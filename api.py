@@ -1,48 +1,79 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 import joblib
 import numpy as np
+import os
 
+# --------------------------------------------------
+# FastAPI App
+# --------------------------------------------------
 
 app = FastAPI()
 
-# Load trained model
+# --------------------------------------------------
+# Load Model
+# --------------------------------------------------
+
 model = joblib.load("gas_model.pkl")
 
-# Constants for gas cylinder
-TARE_WEIGHT = 9.0
+# --------------------------------------------------
+# Request Model
+# --------------------------------------------------
+
+class PredictionRequest(BaseModel):
+    weight: float
+    day_of_week: int
+    days_since_last_refill: int
+    weight_change: float
+    rolling_avg_usage: float
+    month: int
+    is_weekend: int
+
+# --------------------------------------------------
+# Home Route
+# --------------------------------------------------
 
 @app.get("/")
 def home():
-    return {"message": "Gas ML API is running"}
+    return {
+        "message": "Gas ML API is running"
+    }
+
+# --------------------------------------------------
+# Prediction Route
+# --------------------------------------------------
 
 @app.post("/predict")
-def predict(data: dict):
+def predict(data: PredictionRequest):
+
     try:
-       
-        weight = data["weight"]
-        day_of_week = data["day_of_week"]
-        hour_of_day = data["hour_of_day"]
-        days_since_last_refill = data["days_since_last_refill"]
-        weight_change = data["weight_change"]
 
-        # Calculate net gas weight (current weight - empty cylinder weight)
-        net_weight = max(0, weight - TARE_WEIGHT)
-        
-        # Use net_weight as the first feature for the model
-        X = np.array([[net_weight, day_of_week, hour_of_day,
-                       days_since_last_refill, weight_change]])
+        X = np.array([[
+            data.weight,
+            data.day_of_week,
+            data.days_since_last_refill,
+            data.weight_change,
+            data.rolling_avg_usage,
+            data.month,
+            data.is_weekend
+        ]])
 
-        predicted_usage = model.predict(X)[0]
+        prediction = model.predict(X)[0]
 
-        days_remaining = net_weight / predicted_usage if predicted_usage > 0 and net_weight > 0 else 0
+        days_remaining = max(0, round(float(prediction), 1))
 
         return {
-            "predicted_usage_per_day": float(predicted_usage),
-            "days_until_refill": round(float(days_remaining), 1)
+            "days_remaining": days_remaining
         }
 
     except Exception as e:
-        return {"error": str(e)}
-    
-import os
+
+        return {
+            "error": str(e)
+        }
+
+# --------------------------------------------------
+# Render Port
+# --------------------------------------------------
+
 port = int(os.environ.get("PORT", 8000))
